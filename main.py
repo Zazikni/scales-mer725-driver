@@ -21,10 +21,10 @@ def update_dates(product: dict) -> dict:
 if __name__ == "__main__":
 
     logging.basicConfig(level=logging.DEBUG)
-    scales = Scales(SCALE_IP, SCALE_PORT, SCALE_PASSWORD, 'TCP')
+    scales = Scales(SCALE_IP, SCALE_PORT, SCALE_PASSWORD, "TCP")
     products = scales.get_products_json()
-    #pprint(products)
+    pprint(products)
     for product in products["products"]:
         product = update_dates(product)
-    #pprint(products)
+    # pprint(products)
     scales.send_json_products(products)

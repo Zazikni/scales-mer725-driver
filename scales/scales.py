@@ -11,7 +11,7 @@ from .utilities import get_json_from_bytearray
 
 
 class Scales:
-    def __init__(self, ip: str, port: int, password: str, protocol:str):
+    def __init__(self, ip: str, port: int, password: str, protocol: str):
 
         self.ip: str = ip
         self.port: int = port
@@ -19,21 +19,24 @@ class Scales:
         self.command_len_bytes: int = 4
 
         self.__file_chunk_limit = 60000
-        if protocol not in ('TCP', 'UDP'):
-            raise ValueError('Протокол должен быть TCP или UDP')
+        if protocol not in ("TCP", "UDP"):
+            raise ValueError("Протокол должен быть TCP или UDP")
         self.__protocol = socket.SOCK_DGRAM if protocol == "UDP" else socket.SOCK_STREAM
         self.__get_socket()
 
     def __del__(self):
-        logging.info(f"Сокет {self.__socket.getsockname()} → {self.__socket.getpeername()} ЗАКРЫТ")
+        logging.info(
+            f"Сокет {self.__socket.getsockname()} → {self.__socket.getpeername()} ЗАКРЫТ"
+        )
         self.__socket.close()
-
 
     def __get_socket(self):
         try:
             self.__socket = socket.socket(socket.AF_INET, self.__protocol)
             self.__socket.connect((self.ip, self.port))
-            logging.info(f"Сокет успешно создан {self.__socket.getsockname()} → {self.__socket.getpeername()}")
+            logging.info(
+                f"Сокет успешно создан {self.__socket.getsockname()} → {self.__socket.getpeername()}"
+            )
         except Exception as e:
             logging.error(f"Не удалось создать сокет\n{e}")
             raise e
@@ -49,7 +52,9 @@ class Scales:
         )
         package = self.__packet_header_gen(payload) + payload
 
-        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        return (
+            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        )
 
     def __file_creation_status_request_gen(self) -> bytes:
         """
@@ -62,7 +67,9 @@ class Scales:
             + self.__password
         )
         package = self.__packet_header_gen(payload) + payload
-        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        return (
+            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        )
 
     def __hash_calculating_request_gen(self) -> bytes:
         """
@@ -76,7 +83,9 @@ class Scales:
             + Scales.Codes.JsonFileReceiving.HASH_CALCULATING_STAGE_CODE
         )
         package = self.__packet_header_gen(payload) + payload
-        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        return (
+            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        )
 
     def __hash_calculating_status_request_gen(self) -> bytes:
         """
@@ -90,7 +99,9 @@ class Scales:
             + Scales.Codes.JsonFileReceiving.HASH_CALCULATING_STATUS_STAGE_CODE
         )
         package = self.__packet_header_gen(payload) + payload
-        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        return (
+            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        )
 
     def __file_transfer_init_request_gen(self) -> bytes:
         payload = (
@@ -99,50 +110,79 @@ class Scales:
             + Scales.Codes.JsonFileReceiving.FILE_RECEIVING_INITIATION_STAGE_CODE
         )
         package = self.__packet_header_gen(payload) + payload
-        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        return (
+            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        )
 
     def __send(self, data: bytes, label: str):
-        logging.debug(f"[>] На весы {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | HEX: {data.hex()} | {data}")
+        logging.debug(
+            f"[>] На весы {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | HEX: {data.hex()} | {data}"
+        )
         self.__socket.sendall(data)
 
     def __send_big_data(self, data: bytes, label: str):
-        logging.debug(f"[>] На весы {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | {list(data[:17])}")
+        logging.debug(
+            f"[>] На весы {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | {list(data[:17])}"
+        )
         self.__socket.sendall(data)
 
-    def __recv_big_data(self, timeout: float = 20) -> Optional[tuple[bytes, tuple]]:
-        self.__socket.settimeout(timeout)
-        try:
-            data, addr = self.__socket.recvfrom(65507)
-            logging.debug(
-                f"[<] От весов {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | {list(data[:17])}"
-            )
-            return data, addr
-        except socket.timeout:
-            logging.warning("Не удалось получить ответ от весов за отведенное время.")
-            return None
-
     def __recv(
-        self,bufsize:int = 2048, timeout: float = 5
+        self, bufsize: int = 2048, timeout: float = 5, bigdata: bool = False
     ) -> Optional[bytes]:
         self.__socket.settimeout(timeout)
         try:
 
             if self.__protocol == socket.SOCK_STREAM:
-                data = self.__socket.recv(bufsize)
-                logging.debug(
-                    f"[<] От весов TCP {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
-                )
+                data = self.__recv_tcp_frame(timeout)
+                if not bigdata:
+                    logging.debug(
+                        f"[<] От весов TCP {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
+                    )
+                else:
+                    logging.debug(
+                        f"[<] От весов TCP {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | {list(data[:17])}"
+                    )
                 return data if data else None
             else:
                 data, _ = self.__socket.recvfrom(bufsize)
-                logging.debug(
-                    f"[<] От весов UDP {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
-                )
+                if not bigdata:
+
+                    logging.debug(
+                        f"[<] От весов UDP {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
+                    )
+                else:
+                    logging.debug(
+                        f"[<] От весов UDP {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | {list(data[:17])}"
+                    )
                 return data
 
         except socket.timeout:
             logging.warning("Не удалось получить ответ от весов за отведенное время.")
             return None
+
+    def __recv_tcp_frame(self, timeout: float) -> bytes:
+
+        raw_len = self.__recv_exact(self.command_len_bytes, timeout)
+        frame_len = int.from_bytes(raw_len, byteorder="little", signed=False)
+
+        body = self.__recv_exact(frame_len, timeout)
+        return body
+
+    def __recv_exact(self, n: int, timeout: float) -> bytes:
+        self.__socket.settimeout(timeout)
+        chunks = []
+        received = 0
+
+        while received < n:
+            chunk = self.__socket.recv(n - received)
+            if not chunk:
+                raise ConnectionResetError(
+                    "TCP соединение закрыто удаленной стороной (recv вернул 0 байт)."
+                )
+            chunks.append(chunk)
+            received += len(chunk)
+
+        return b"".join(chunks)
 
     def get_products_json(self) -> dict:
         """
@@ -155,7 +195,7 @@ class Scales:
             "Пакет с запросом на создание файла",
         )
         scales_response = self.__recv()
-        if scales_response[8].to_bytes() != Scales.Codes.ResponseCodes.SUCCESS:
+        if bytes([scales_response[4]]) != Scales.Codes.ResponseCodes.SUCCESS:
             logging.warning("Ответ весов не удовлетворяет условиям.")
 
         while True:
@@ -165,7 +205,7 @@ class Scales:
             )
             time.sleep(1)
             scales_response = self.__recv()
-            if scales_response[8].to_bytes() == Scales.Codes.ResponseCodes.IN_PROGRESS:
+            if bytes([scales_response[4]]) == Scales.Codes.ResponseCodes.IN_PROGRESS:
                 continue
             else:
                 break
@@ -174,22 +214,20 @@ class Scales:
             "Пакет с запросом на начало расчёта хэш-данных",
         )
         scales_response = self.__recv()
-        if scales_response[8].to_bytes() != Scales.Codes.ResponseCodes.SUCCESS:
+        if bytes([scales_response[4]]) != Scales.Codes.ResponseCodes.SUCCESS:
             logging.warning("Ответ весов не удовлетворяет условиям.")
-        file_hash:bytes = b''
+        file_hash: bytes = b""
         time.sleep(1)
         self.__send(
             self.__hash_calculating_status_request_gen(),
             "Пакет с запросом на получение статуса расчёта хэш-данных",
         )
         scales_response = self.__recv()
-        if scales_response[8].to_bytes() == Scales.Codes.ResponseCodes.SUCCESS:
+        if bytes([scales_response[4]]) == Scales.Codes.ResponseCodes.SUCCESS:
             pass
             # file_hash = scales_response[10:26]
         else:
             logging.warning("Ответ весов не удовлетворяет условиям.")
-            # logging.warning(f"[<] От весов {addr} → {self.__socket.getsockname()[1]} | {len(scales_response)} байт | HEX: {scales_response.hex()} | {scales_response} | {list(scales_response)}")
-
 
         file_data = bytearray()
         while True:
@@ -198,12 +236,14 @@ class Scales:
                 "Пакет с запросом на получение порции файла",
             )
             time.sleep(0.3)
-            data, address = self.__recv_big_data()
-            is_last_chunk = data[9] == 1  # 10-й байт флаг последней порции
-            file_data.extend(data[16:])
+            data = self.__recv(65507, timeout=10, bigdata=True)
+            is_last_chunk = data[5] == 1  # 10-й байт флаг последней порции
+            file_data.extend(data[12:])
             if is_last_chunk:
                 break
-        logging.info(f"Сокет {self.__socket.getpeername()} данные товаров в формате JSON получены.")
+        logging.info(
+            f"Сокет {self.__socket.getpeername()} данные товаров в формате JSON получены."
+        )
         return get_json_from_bytearray(file_data)
 
     def __initial_file_transfer_request_gen(
@@ -230,8 +270,9 @@ class Scales:
             )
         )
         package = self.__packet_header_gen(payload) + payload
-        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
-
+        return (
+            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        )
 
     def __file_transfer_commands_gen(
         self,
@@ -267,7 +308,10 @@ class Scales:
                 + chunk
             )
             package = self.__packet_header_gen(payload) + payload
-            packets.append(Scales.tcp_command_len_generator(package, self.command_len_bytes) + package)
+            packets.append(
+                Scales.tcp_command_len_generator(package, self.command_len_bytes)
+                + package
+            )
 
             offset_param += self.__file_chunk_limit
 
@@ -283,7 +327,9 @@ class Scales:
         file_check_code = bytes([0x09])
         payload = command + self.__password + file_check_code
         package = self.__packet_header_gen(payload) + payload
-        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        return (
+            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+        )
 
     #
     @staticmethod
@@ -296,7 +342,7 @@ class Scales:
             )
 
     @staticmethod
-    def tcp_command_len_generator(package:bytes, length:int) -> bytes:
+    def tcp_command_len_generator(package: bytes, length: int) -> bytes:
         return len(package).to_bytes(length, byteorder="little", signed=False)
 
     def send_json_products(self, data: dict) -> None:
@@ -315,32 +361,36 @@ class Scales:
             "Пакет, содержащий хэш-данные файла и параметры",
         )
         response = self.__recv()
-        if response[8].to_bytes() != Scales.Codes.ResponseCodes.SUCCESS:
+        if bytes([response[4]]) != Scales.Codes.ResponseCodes.SUCCESS:
             logging.error(f"Не удалось инициализировать передачу JSON файла на весы.")
-            raise DeviceError("Попытка инициализации передачи файла завершилась неудачей.")
+            raise DeviceError(
+                "Попытка инициализации передачи файла завершилась неудачей."
+            )
         packets = self.__file_transfer_commands_gen(json_bytes)
         for packet in packets:
             self.__send_big_data(packet, "Пакет, содержащий порцию файла")
             response = self.__recv()
-            if response[8].to_bytes() == Scales.Codes.ResponseCodes.SUCCESS:
+            if bytes([response[4]]) == Scales.Codes.ResponseCodes.SUCCESS:
                 continue
             else:
                 logging.error(f"Не удалось загрузить порцию файла.")
-                raise DeviceError("Попытка загрузить порцию файла завершилась неудачей.")
+                raise DeviceError(
+                    "Попытка загрузить порцию файла завершилась неудачей."
+                )
         while True:
             self.__send(
                 self.__transfered_file_check_command_gen(),
                 "Пакет с запросом на проверку отправляемого файла",
             )
             response = self.__recv()
-            if response[9].to_bytes() == Scales.Codes.ResponseCodes.IN_PROGRESS_FILE:
+            if bytes([response[5]]) == Scales.Codes.ResponseCodes.IN_PROGRESS_FILE:
                 time.sleep(1)
-                logging.info('Файл еще находится на стадии проверки устройством.')
+                logging.info("Файл еще находится на стадии проверки устройством.")
                 continue
-            elif response[9].to_bytes() == Scales.Codes.ResponseCodes.SUCCESS:
-                logging.info('Файл успешно обработан устройством.')
+            elif bytes([response[5]]) == Scales.Codes.ResponseCodes.SUCCESS:
+                logging.info("Файл успешно обработан устройством.")
                 break
-            elif response[9].to_bytes() == Scales.Codes.ResponseCodes.ERROR_FILE:
+            elif bytes([response[5]]) == Scales.Codes.ResponseCodes.ERROR_FILE:
                 logging.error(f"Файл обработан с ошибкой.  Загрузка не удалась.")
 
     #
@@ -374,7 +424,7 @@ class Scales:
         class ResponseCodes:
             SUCCESS = bytes([0x00])
             ERROR_FILE = bytes([0x02])
-            IN_PROGRESS = bytes([0xac])
+            IN_PROGRESS = bytes([0xAC])
             IN_PROGRESS_FILE = bytes([0x01])
 
         class JsonFileReceiving:
