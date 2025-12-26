@@ -3,6 +3,7 @@ import json
 import sys
 import socket
 import time
+from json import JSONDecodeError
 from typing import Optional, Tuple
 import logging
 
@@ -114,17 +115,28 @@ class Scales:
             Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
         )
 
-    def __send(self, data: bytes, label: str):
-        logging.debug(
-            f"[>] На весы {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | HEX: {data.hex()} | {data}"
-        )
-        self.__socket.sendall(data)
+    def __send(self, data: bytes, label: str, bigdata: bool = False) -> None:
+        if self.__protocol == socket.SOCK_STREAM:
+            self.__socket.sendall(data)
+            if not bigdata:
+                logging.debug(
+                    f"[>] На весы TCP {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | HEX: {data.hex()} | {data}"
+                )
+            else:
+                logging.debug(
+                    f"[>] На весы TCP {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | {list(data[:17])}"
+                )
 
-    def __send_big_data(self, data: bytes, label: str):
-        logging.debug(
-            f"[>] На весы {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | {list(data[:17])}"
-        )
-        self.__socket.sendall(data)
+        else:
+            self.__socket.sendto(data, (self.ip, self.port))
+            if not bigdata:
+                logging.debug(
+                    f"[>] На весы UDP {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | HEX: {data.hex()} | {data}"
+                )
+            else:
+                logging.debug(
+                    f"[>] На весы UDP {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | {list(data[:17])}"
+                )
 
     def __recv(
         self, bufsize: int = 2048, timeout: float = 5, bigdata: bool = False
@@ -184,19 +196,45 @@ class Scales:
 
         return b"".join(chunks)
 
+    def __response_validator(
+        self, response: bytes, length: int, cond: str = "eq"
+    ) -> None:
+        if response is None:
+            raise DeviceError("Ответ от весов не получен.")
+        if cond == "eq":
+            if not (len(response) == length):
+                raise DeviceError(
+                    f"Ответ от весов не соответствует ожидаемой согласно протоколу длине ."
+                )
+        elif cond == "gt":
+            if not (len(response) > length):
+                raise DeviceError(
+                    f"Ответ от весов не соответствует ожидаемой согласно протоколу длине ."
+                )
+        elif cond == "lt":
+            if not (len(response) < length):
+                raise DeviceError(
+                    f"Ответ от весов не соответствует ожидаемой согласно протоколу длине ."
+                )
+
     def get_products_json(self) -> dict:
         """
         Запрашивает данные с весов.
 
         :return: Словарь с информацией о товарах на весах.
         """
+        logging.info(
+            f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} инициирован процесс получения JSON списка товаров."
+        )
         self.__send(
             self.__file_creation_request_gen(),
             "Пакет с запросом на создание файла",
         )
         scales_response = self.__recv()
-        if bytes([scales_response[4]]) != Scales.Codes.ResponseCodes.SUCCESS:
-            logging.warning("Ответ весов не удовлетворяет условиям.")
+        self.__response_validator(scales_response, length=5)
+
+        if scales_response[4] != Scales.Codes.ResponseCodes.SUCCESS:
+            raise DeviceError("Ответ весов не удовлетворяет условиям.")
 
         while True:
             self.__send(
@@ -205,29 +243,35 @@ class Scales:
             )
             time.sleep(1)
             scales_response = self.__recv()
-            if bytes([scales_response[4]]) == Scales.Codes.ResponseCodes.IN_PROGRESS:
+            self.__response_validator(scales_response, length=5)
+            if scales_response[4] == Scales.Codes.ResponseCodes.IN_PROGRESS:
                 continue
             else:
                 break
+
         self.__send(
             self.__hash_calculating_request_gen(),
             "Пакет с запросом на начало расчёта хэш-данных",
         )
+
         scales_response = self.__recv()
-        if bytes([scales_response[4]]) != Scales.Codes.ResponseCodes.SUCCESS:
-            logging.warning("Ответ весов не удовлетворяет условиям.")
+        self.__response_validator(scales_response, length=5)
+        if scales_response[4] != Scales.Codes.ResponseCodes.SUCCESS:
+            raise DeviceError("Ответ весов не удовлетворяет условиям.")
         file_hash: bytes = b""
         time.sleep(1)
+
         self.__send(
             self.__hash_calculating_status_request_gen(),
             "Пакет с запросом на получение статуса расчёта хэш-данных",
         )
         scales_response = self.__recv()
-        if bytes([scales_response[4]]) == Scales.Codes.ResponseCodes.SUCCESS:
+        self.__response_validator(scales_response, length=22)
+        if scales_response[4] == Scales.Codes.ResponseCodes.SUCCESS:
             pass
             # file_hash = scales_response[10:26]
         else:
-            logging.warning("Ответ весов не удовлетворяет условиям.")
+            raise DeviceError("Ответ весов не удовлетворяет условиям.")
 
         file_data = bytearray()
         while True:
@@ -237,14 +281,25 @@ class Scales:
             )
             time.sleep(0.3)
             data = self.__recv(65507, timeout=10, bigdata=True)
-            is_last_chunk = data[5] == 1  # 10-й байт флаг последней порции
-            file_data.extend(data[12:])
+            self.__response_validator(scales_response, length=12, cond="gt")
+            try:
+                is_last_chunk = data[5] == 1  # 10-й байт флаг последней порции
+                file_data.extend(data[12:])
+            except IndexError:
+                raise DeviceError("Ошибка при получении порции файла.")
             if is_last_chunk:
                 break
-        logging.info(
-            f"Сокет {self.__socket.getpeername()} данные товаров в формате JSON получены."
-        )
-        return get_json_from_bytearray(file_data)
+
+        try:
+            json_data = get_json_from_bytearray(file_data)
+            logging.info(
+                f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} данные товаров в формате JSON получены."
+            )
+            return json_data
+
+        except JSONDecodeError as e:
+            logging.error("Не удалось конвертировать  bytearray в dict ")
+            raise e
 
     def __initial_file_transfer_request_gen(
         self, data: bytes, clear_database: bool = False
@@ -319,6 +374,7 @@ class Scales:
 
     def __transfered_file_check_command_gen(self):
         """
+
         Формирует команду для весов.
 
         :return: Пакет с запросом на проверку отправляемого файла
@@ -352,28 +408,31 @@ class Scales:
         :param data: Байтовые данные, содержащие JSON.
         :return: None
         """
+        logging.info(
+            f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} инициирован процесс отправки JSON списка товаров."
+        )
         json_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(
             "utf-8"
         )
-        response: bytes
+        scales_response: bytes
         self.__send(
-            self.__initial_file_transfer_request_gen(json_bytes, clear_database=False),
+            self.__initial_file_transfer_request_gen(json_bytes, clear_database=True),
             "Пакет, содержащий хэш-данные файла и параметры",
         )
-        response = self.__recv()
-        if bytes([response[4]]) != Scales.Codes.ResponseCodes.SUCCESS:
-            logging.error(f"Не удалось инициализировать передачу JSON файла на весы.")
+        scales_response = self.__recv()
+        self.__response_validator(scales_response, length=5)
+        if scales_response[4] != Scales.Codes.ResponseCodes.SUCCESS:
             raise DeviceError(
-                "Попытка инициализации передачи файла завершилась неудачей."
+                "Не удалось инициализировать передачу JSON файла на весы. Ошибка на этапе передачи хэш-данных файла и параметров."
             )
         packets = self.__file_transfer_commands_gen(json_bytes)
         for packet in packets:
-            self.__send_big_data(packet, "Пакет, содержащий порцию файла")
-            response = self.__recv()
-            if bytes([response[4]]) == Scales.Codes.ResponseCodes.SUCCESS:
+            self.__send(packet, "Пакет, содержащий порцию файла", bigdata=True)
+            scales_response = self.__recv()
+            self.__response_validator(scales_response, length=5)
+            if scales_response[4] == Scales.Codes.ResponseCodes.SUCCESS:
                 continue
             else:
-                logging.error(f"Не удалось загрузить порцию файла.")
                 raise DeviceError(
                     "Попытка загрузить порцию файла завершилась неудачей."
                 )
@@ -382,16 +441,23 @@ class Scales:
                 self.__transfered_file_check_command_gen(),
                 "Пакет с запросом на проверку отправляемого файла",
             )
-            response = self.__recv()
-            if bytes([response[5]]) == Scales.Codes.ResponseCodes.IN_PROGRESS_FILE:
+            scales_response = self.__recv()
+            self.__response_validator(scales_response, length=8)
+            if scales_response[5] == Scales.Codes.ResponseCodes.IN_PROGRESS_FILE:
                 time.sleep(1)
-                logging.info("Файл еще находится на стадии проверки устройством.")
+                logging.info(
+                    f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} файл еще находится на стадии проверки устройством."
+                )
                 continue
-            elif bytes([response[5]]) == Scales.Codes.ResponseCodes.SUCCESS:
-                logging.info("Файл успешно обработан устройством.")
+            elif scales_response[5] == Scales.Codes.ResponseCodes.SUCCESS:
+                logging.info(
+                    f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} файл успешно обработан устройством."
+                )
                 break
-            elif bytes([response[5]]) == Scales.Codes.ResponseCodes.ERROR_FILE:
-                logging.error(f"Файл обработан с ошибкой.  Загрузка не удалась.")
+            elif scales_response[5] == Scales.Codes.ResponseCodes.ERROR_FILE:
+                raise DeviceError(
+                    f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} файл обработан с ошибкой.  Загрузка не удалась."
+                )
 
     #
     # def get_all_json_transfer_commands(self, json_bytes) -> dict:
@@ -422,10 +488,10 @@ class Scales:
             UNLIMITED_PACKET_SIZE_CODE = bytes([0xFF])
 
         class ResponseCodes:
-            SUCCESS = bytes([0x00])
-            ERROR_FILE = bytes([0x02])
-            IN_PROGRESS = bytes([0xAC])
-            IN_PROGRESS_FILE = bytes([0x01])
+            SUCCESS = 0x00
+            ERROR_FILE = 0x02
+            IN_PROGRESS = 0xAC
+            IN_PROGRESS_FILE = 0x01
 
         class JsonFileReceiving:
             FILE_CREATION_COMMAND_CODE = bytes([0xFF, 0x14])
