@@ -5,6 +5,8 @@ import socket
 import time
 from typing import Optional, Tuple
 import logging
+
+from .exceptions import DeviceError
 from .utilities import get_json_from_bytearray
 
 
@@ -120,21 +122,27 @@ class Scales:
             return None
 
     def __recv(
-        self, timeout: float = 5, force_exit_if_timeout: bool = False
-    ) -> Optional[tuple[bytes, tuple]]:
+        self,bufsize:int = 2048, timeout: float = 5
+    ) -> Optional[bytes]:
         self.__socket.settimeout(timeout)
         try:
-            data, addr = self.__socket.recvfrom(2048)
-            logging.debug(
-                f"[<] От весов {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
-            )
-            return data, addr
+
+            if self.__protocol == socket.SOCK_STREAM:
+                data = self.__socket.recv(bufsize)
+                logging.debug(
+                    f"[<] От весов TCP {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
+                )
+                return data if data else None
+            else:
+                data, _ = self.__socket.recvfrom(bufsize)
+                logging.debug(
+                    f"[<] От весов UDP {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
+                )
+                return data
+
         except socket.timeout:
             logging.warning("Не удалось получить ответ от весов за отведенное время.")
-            if force_exit_if_timeout:
-                sys.exit(1)
-            else:
-                return None
+            return None
 
     def get_products_json(self) -> dict:
         """
@@ -146,7 +154,7 @@ class Scales:
             self.__file_creation_request_gen(),
             "Пакет с запросом на создание файла",
         )
-        scales_response, _ = self.__recv(force_exit_if_timeout=True)
+        scales_response = self.__recv()
         if scales_response[8].to_bytes() != Scales.Codes.ResponseCodes.SUCCESS:
             logging.warning("Ответ весов не удовлетворяет условиям.")
 
@@ -156,7 +164,7 @@ class Scales:
                 "Пакет с запросом на получение статуса создания файла",
             )
             time.sleep(1)
-            scales_response, _ = self.__recv()
+            scales_response = self.__recv()
             if scales_response[8].to_bytes() == Scales.Codes.ResponseCodes.IN_PROGRESS:
                 continue
             else:
@@ -165,7 +173,7 @@ class Scales:
             self.__hash_calculating_request_gen(),
             "Пакет с запросом на начало расчёта хэш-данных",
         )
-        scales_response, _ = self.__recv()
+        scales_response = self.__recv()
         if scales_response[8].to_bytes() != Scales.Codes.ResponseCodes.SUCCESS:
             logging.warning("Ответ весов не удовлетворяет условиям.")
         file_hash:bytes = b''
@@ -174,7 +182,7 @@ class Scales:
             self.__hash_calculating_status_request_gen(),
             "Пакет с запросом на получение статуса расчёта хэш-данных",
         )
-        scales_response, _ = self.__recv()
+        scales_response = self.__recv()
         if scales_response[8].to_bytes() == Scales.Codes.ResponseCodes.SUCCESS:
             pass
             # file_hash = scales_response[10:26]
@@ -198,67 +206,85 @@ class Scales:
         logging.info(f"Сокет {self.__socket.getpeername()} данные товаров в формате JSON получены.")
         return get_json_from_bytearray(file_data)
 
-    # def __initial_file_transfer_request_gen(
-    #     self, data: bytes, clear_database: bool = False
-    # ) -> bytes:
-    #     md5_hash = hashlib.md5(data).digest()
-    #     payload = (
-    #         Scales.Codes.JsonFileTransfer.FILE_TRANSFER_COMMAND_CODE
-    #         + self.__password
-    #         + Scales.Codes.JsonFileTransfer.HASH_TRANSFER_CODE
-    #         + md5_hash
-    #         + Scales.Codes.JsonFileTransfer.FILE_SIZE_CODE
-    #         + len(data).to_bytes(8, byteorder="big")
-    #         + Scales.Codes.JsonFileTransfer.PRODUCTS_EXPORT_CODE
-    #         + (
-    #             Scales.Codes.JsonFileTransfer.CLEAR_DATABASE_TRUE_CODE
-    #             if clear_database
-    #             else Scales.Codes.JsonFileTransfer.CLEAR_DATABASE_FALSE_CODE
-    #         )
-    #     )
-    #
-    #     return self.__packet_header_gen(payload) + payload
-    #
-    # def __file_transfer_commands_gen(
-    #     self,
-    #     data: bytes,
-    # ) -> Tuple[bytes, ...]:
-    #     command = bytes([0xFF, 0x13])
-    #     chunk_sending_code = bytes([0x03])
-    #     offset_param = 0
-    #     total_len = len(data)
-    #     packets = []
-    #
-    #     while offset_param < total_len:
-    #         # текущая порция данных
-    #         chunk = data[offset_param : offset_param + self.__file_chunk_limit]
-    #         is_last = offset_param + self.__file_chunk_limit >= total_len
-    #
-    #         is_last_byte = bytes([0x01]) if is_last else bytes([0x00])
-    #         offset_bytes = offset_param.to_bytes(4, "little")
-    #         chunk_len_bytes = len(chunk).to_bytes(2, "little")
-    #
-    #         payload = (
-    #             command
-    #             + self.__password
-    #             + chunk_sending_code
-    #             + is_last_byte
-    #             + offset_bytes
-    #             + chunk_len_bytes
-    #             + chunk
-    #         )
-    #         packet = self.__packet_header_gen(payload) + payload
-    #         packets.append(packet)
-    #
-    #         offset_param += self.__file_chunk_limit
-    #
-    #     return tuple(packets)
-    #
-    # def __transfered_file_check_command_gen(self):
-    #     command = bytes([0xFF, 0x13])
-    #     file_check_code = bytes([0x09])
-    #     payload = command + self.__password + file_check_code
-    #     return Scales.__packet_header_gen(payload) + payload
+    def __initial_file_transfer_request_gen(
+        self, data: bytes, clear_database: bool = False
+    ) -> bytes:
+        """
+        Формирует команду для весов.
+
+        :return: Пакет, содержащий хэш-данные файла и параметры
+        """
+        md5_hash = hashlib.md5(data).digest()
+        payload = (
+            Scales.Codes.JsonFileTransfer.FILE_TRANSFER_COMMAND_CODE
+            + self.__password
+            + Scales.Codes.JsonFileTransfer.HASH_TRANSFER_CODE
+            + md5_hash
+            + Scales.Codes.JsonFileTransfer.FILE_SIZE_CODE
+            + len(data).to_bytes(8, byteorder="big")
+            + Scales.Codes.JsonFileTransfer.PRODUCTS_EXPORT_CODE
+            + (
+                Scales.Codes.JsonFileTransfer.CLEAR_DATABASE_TRUE_CODE
+                if clear_database
+                else Scales.Codes.JsonFileTransfer.CLEAR_DATABASE_FALSE_CODE
+            )
+        )
+        package = self.__packet_header_gen(payload) + payload
+        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+
+
+    def __file_transfer_commands_gen(
+        self,
+        data: bytes,
+    ) -> Tuple[bytes, ...]:
+        """
+        Формирует команду для весов.
+
+        :return: Пакеты, содержащие порцию файла
+        """
+        command = bytes([0xFF, 0x13])
+        chunk_sending_code = bytes([0x03])
+        offset_param = 0
+        total_len = len(data)
+        packets = []
+
+        while offset_param < total_len:
+            # текущая порция данных
+            chunk = data[offset_param : offset_param + self.__file_chunk_limit]
+            is_last = offset_param + self.__file_chunk_limit >= total_len
+
+            is_last_byte = bytes([0x01]) if is_last else bytes([0x00])
+            offset_bytes = offset_param.to_bytes(4, "little")
+            chunk_len_bytes = len(chunk).to_bytes(2, "little")
+
+            payload = (
+                command
+                + self.__password
+                + chunk_sending_code
+                + is_last_byte
+                + offset_bytes
+                + chunk_len_bytes
+                + chunk
+            )
+            package = self.__packet_header_gen(payload) + payload
+            packets.append(Scales.tcp_command_len_generator(package, self.command_len_bytes) + package)
+
+            offset_param += self.__file_chunk_limit
+
+        return tuple(packets)
+
+    def __transfered_file_check_command_gen(self):
+        """
+        Формирует команду для весов.
+
+        :return: Пакет с запросом на проверку отправляемого файла
+        """
+        command = bytes([0xFF, 0x13])
+        file_check_code = bytes([0x09])
+        payload = command + self.__password + file_check_code
+        package = self.__packet_header_gen(payload) + payload
+        return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+
     #
     @staticmethod
     def __packet_header_gen(payload: bytes):
@@ -272,50 +298,51 @@ class Scales:
     @staticmethod
     def tcp_command_len_generator(package:bytes, length:int) -> bytes:
         return len(package).to_bytes(length, byteorder="little", signed=False)
-    #
-    # def send_json_products(self, data: dict) -> None:
-    #     """
-    #     Отправляет байтовые данные содержащие JSON с товарами на весы.
-    #
-    #     :param data: байтовые данные, содержащие JSON.
-    #     :return: None
-    #     """
-    #     json_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(
-    #         "utf-8"
-    #     )
-    #     response: bytes
-    #     self.__send(
-    #         self.__initial_file_transfer_request_gen(json_bytes, clear_database=True),
-    #         "Пакет, содержащий хэш-данные файла и параметры",
-    #     )
-    #     response, _ = self.__recv(force_exit_if_timeout=True)
-    #     if response != b"\x02\x03\xff\x13\x00":
-    #         logging.error(f"Не удалось инициализировать передачу JSON файла на весы.")
-    #         sys.exit(1)
-    #     packets = self.__file_transfer_commands_gen(json_bytes)
-    #     for packet in packets:
-    #         self.__send_big_data(packet, "Пакет, содержащий порцию файла")
-    #         response, _ = self.__recv()
-    #         if response == b"\x02\x03\xff\x13\x00":
-    #             continue
-    #         else:
-    #             logging.error(f"Не удалось загрузить порцию файла.")
-    #             sys.exit(1)
-    #     while True:
-    #         self.__send(
-    #             self.__transfered_file_check_command_gen(),
-    #             "Пакет с запросом на проверку отправляемого файла",
-    #         )
-    #
-    #         response, _ = self.__recv()
-    #         if response == b"\x02\x06\xff\x13\x00\x01\x00\x00":
-    #             time.sleep(1)
-    #             continue
-    #         elif response == b"\x02\x06\xff\x13\x00\x00\x00\x00":
-    #             break
-    #         elif response == b"\x02\x06\xff\x13\x00\x02\x00\x00":
-    #             logging.error(f"Файл обработан с ошибкой.  Загрузка не удалась.")
-    #             sys.exit(1)
+
+    def send_json_products(self, data: dict) -> None:
+        """
+        Отправляет байтовые данные содержащие JSON с товарами на весы.
+
+        :param data: Байтовые данные, содержащие JSON.
+        :return: None
+        """
+        json_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        response: bytes
+        self.__send(
+            self.__initial_file_transfer_request_gen(json_bytes, clear_database=False),
+            "Пакет, содержащий хэш-данные файла и параметры",
+        )
+        response = self.__recv()
+        if response[8].to_bytes() != Scales.Codes.ResponseCodes.SUCCESS:
+            logging.error(f"Не удалось инициализировать передачу JSON файла на весы.")
+            raise DeviceError("Попытка инициализации передачи файла завершилась неудачей.")
+        packets = self.__file_transfer_commands_gen(json_bytes)
+        for packet in packets:
+            self.__send_big_data(packet, "Пакет, содержащий порцию файла")
+            response = self.__recv()
+            if response[8].to_bytes() == Scales.Codes.ResponseCodes.SUCCESS:
+                continue
+            else:
+                logging.error(f"Не удалось загрузить порцию файла.")
+                raise DeviceError("Попытка загрузить порцию файла завершилась неудачей.")
+        while True:
+            self.__send(
+                self.__transfered_file_check_command_gen(),
+                "Пакет с запросом на проверку отправляемого файла",
+            )
+            response = self.__recv()
+            if response[9].to_bytes() == Scales.Codes.ResponseCodes.IN_PROGRESS_FILE:
+                time.sleep(1)
+                logging.info('Файл еще находится на стадии проверки устройством.')
+                continue
+            elif response[9].to_bytes() == Scales.Codes.ResponseCodes.SUCCESS:
+                logging.info('Файл успешно обработан устройством.')
+                break
+            elif response[9].to_bytes() == Scales.Codes.ResponseCodes.ERROR_FILE:
+                logging.error(f"Файл обработан с ошибкой.  Загрузка не удалась.")
+
     #
     # def get_all_json_transfer_commands(self, json_bytes) -> dict:
     #     """
@@ -337,7 +364,7 @@ class Scales:
 
     class Codes:
         """
-        Cодержит все коды взаимодействия с весами.
+        Содержит все коды взаимодействия с весами.
         """
 
         class Global:
@@ -346,7 +373,9 @@ class Scales:
 
         class ResponseCodes:
             SUCCESS = bytes([0x00])
+            ERROR_FILE = bytes([0x02])
             IN_PROGRESS = bytes([0xac])
+            IN_PROGRESS_FILE = bytes([0x01])
 
         class JsonFileReceiving:
             FILE_CREATION_COMMAND_CODE = bytes([0xFF, 0x14])

@@ -27,4 +27,4 @@ if __name__ == "__main__":
     for product in products["products"]:
         product = update_dates(product)
     #pprint(products)
-    # scales.send_json_products(products)
+    scales.send_json_products(products)
