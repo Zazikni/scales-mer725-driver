@@ -197,10 +197,14 @@ class Scales:
         return b"".join(chunks)
 
     def __response_validator(
-        self, response: bytes, length: int, cond: str = "eq"
+        self, response: bytes, length: int, cond: str = "eq", min_length: int = 4
     ) -> None:
         if response is None:
             raise DeviceError("Ответ от весов не получен.")
+        if len(response) < min_length:
+            raise DeviceError(
+                f"Короткий ответ от весов: {len(response)} байт, ожидалось ≥ {min_length}"
+            )
         if cond == "eq":
             if not (len(response) == length):
                 raise DeviceError(
