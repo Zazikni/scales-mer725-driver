@@ -23,6 +23,7 @@ class Scales:
         self.__get_socket()
 
     def __del__(self):
+        logging.info(f"Сокет {self.__socket.getsockname()} → {self.__socket.getpeername()} ЗАКРЫТ")
         self.__socket.close()
 
 
@@ -30,7 +31,7 @@ class Scales:
         try:
             self.__socket = socket.socket(socket.AF_INET, self.__protocol)
             self.__socket.connect((self.ip, self.port))
-            logging.info(f"Cокет успешно создан\n")
+            logging.info(f"Сокет успешно создан {self.__socket.getsockname()} → {self.__socket.getpeername()}")
         except Exception as e:
             logging.error(f"Не удалось создать сокет\n{e}")
             raise e
@@ -99,19 +100,19 @@ class Scales:
         return Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
 
     def __send(self, data: bytes, label: str):
-        logging.debug(f"[>] {label} | {len(data)} байт | HEX: {data.hex()} | {data}")
+        logging.debug(f"[>] На весы {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | HEX: {data.hex()} | {data}")
         self.__socket.sendall(data)
 
-    # def __send_big_data(self, data: bytes, label: str):
-    #     logging.debug(f"[>] {label} | {len(data)} байт | {list(data[:13])}")
-    #     self.__socket.sendto(data, (self.ip, self.port))
-    #
+    def __send_big_data(self, data: bytes, label: str):
+        logging.debug(f"[>] На весы {self.__socket.getsockname()} → {self.__socket.getpeername()} {label} | {len(data)} байт | {list(data[:17])}")
+        self.__socket.sendall(data)
+
     def __recv_big_data(self, timeout: float = 20) -> Optional[tuple[bytes, tuple]]:
         self.__socket.settimeout(timeout)
         try:
             data, addr = self.__socket.recvfrom(65507)
             logging.debug(
-                f"[<] От весов {addr} → {self.__socket.getsockname()[1]} | {len(data)} байт | {list(data[:17])}"
+                f"[<] От весов {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | {list(data[:17])}"
             )
             return data, addr
         except socket.timeout:
@@ -125,11 +126,7 @@ class Scales:
         try:
             data, addr = self.__socket.recvfrom(2048)
             logging.debug(
-                f"[<] От весов {addr} → {self.__socket.getsockname()[1]} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
-            )
-            for num, byte in enumerate(data):
-                logging.debug(
-                f"[<] Номер байта: {num+1} Значение байта: {byte.to_bytes().hex()}"
+                f"[<] От весов {self.__socket.getpeername()} → {self.__socket.getsockname()} | {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
             )
             return data, addr
         except socket.timeout:
@@ -143,7 +140,7 @@ class Scales:
         """
         Запрашивает данные с весов.
 
-        :return: словарь с информацией о товарах на весах.
+        :return: Словарь с информацией о товарах на весах.
         """
         self.__send(
             self.__file_creation_request_gen(),
@@ -179,9 +176,11 @@ class Scales:
         )
         scales_response, _ = self.__recv()
         if scales_response[8].to_bytes() == Scales.Codes.ResponseCodes.SUCCESS:
-            file_hash = scales_response[10:26]
+            pass
+            # file_hash = scales_response[10:26]
         else:
             logging.warning("Ответ весов не удовлетворяет условиям.")
+            # logging.warning(f"[<] От весов {addr} → {self.__socket.getsockname()[1]} | {len(scales_response)} байт | HEX: {scales_response.hex()} | {scales_response} | {list(scales_response)}")
 
 
         file_data = bytearray()
@@ -196,7 +195,7 @@ class Scales:
             file_data.extend(data[16:])
             if is_last_chunk:
                 break
-
+        logging.info(f"Сокет {self.__socket.getpeername()} данные товаров в формате JSON получены.")
         return get_json_from_bytearray(file_data)
 
     # def __initial_file_transfer_request_gen(
