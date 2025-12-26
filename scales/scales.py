@@ -281,7 +281,7 @@ class Scales:
             )
             time.sleep(0.3)
             data = self.__recv(65507, timeout=10, bigdata=True)
-            self.__response_validator(scales_response, length=12, cond="gt")
+            self.__response_validator(data, length=12, cond="gt")
             try:
                 is_last_chunk = data[5] == 1  # 10-й байт флаг последней порции
                 file_data.extend(data[12:])
