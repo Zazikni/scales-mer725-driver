@@ -24,5 +24,6 @@ def get_json_from_bytearray(data: bytes) -> dict | None:
         return result
 
     except Exception as e:
-        logging.error("Ошибка декодирования JSON:", e)
+        logging.error(f"Ошибка декодирования JSON: {e}")
+
         return None
