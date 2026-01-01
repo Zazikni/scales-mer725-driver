@@ -1,11 +1,10 @@
 import logging
-import datetime
+import pprint
 from json import JSONDecodeError
-from pprint import pprint
+from datetime import datetime, timedelta
 
 from scales import Scales, DeviceError
 from settings import SCALE_IP, SCALE_PORT, SCALE_PASSWORD
-from datetime import datetime, timedelta
 
 
 def update_dates(product: dict) -> dict:
@@ -19,20 +18,56 @@ def update_dates(product: dict) -> dict:
     return product
 
 
-if __name__ == "__main__":
+def run_products_update_once() -> None:
+    scales = Scales(
+        SCALE_IP,
+        SCALE_PORT,
+        SCALE_PASSWORD,
+        "TCP",
+        auto_reconnect=True,
+        # connect_timeout=3.0,
+        # default_timeout=5.0,
+        # retries=2,
+        # retry_delay=0.5,
+    )
 
-    logging.basicConfig(level=logging.DEBUG)
-    scales = Scales(SCALE_IP, SCALE_PORT, SCALE_PASSWORD, "TCP")
-    try:
-        products = scales.get_products_json()
-    except JSONDecodeError as e:
-        logging.error(f"{e}")
-    except DeviceError as e:
-        logging.error(f"{e}")
-    except IndexError as e:
-        logging.error(f"{e}")
-    # pprint(products)
-    for product in products["products"]:
-        product = update_dates(product)
-    # pprint(products)
+    products = scales.get_products_json()
+
+    for i, product in enumerate(products.get("products", [])):
+        products["products"][i] = update_dates(product)
+    # pprint.pprint(products)
     scales.send_json_products(products)
+
+
+def run_products_update(attempts: int = 2) -> None:
+    for attempt in range(1, attempts + 1):
+        try:
+            run_products_update_once()
+            logging.info("Обновление товаров завершено успешно.")
+            break
+
+        except DeviceError as e:
+
+            logging.error("Ошибка обмена с весами: %s", e)
+
+            if attempt < attempts:
+                logging.warning("Повтор полной операции...")
+
+                continue
+            logging.error(
+                f"Весы недоступны после %d попыток. Итерация завершена.", attempts
+            )
+            return
+
+        except JSONDecodeError as e:
+            logging.error(f"Получены некорректные данные от весов (JSON): {e}")
+            raise
+
+        except Exception as e:
+            logging.exception(f"Непредвиденная ошибка: {e}")
+            raise
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    run_products_update(attempts=2)
