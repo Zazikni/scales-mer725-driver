@@ -49,7 +49,7 @@ class Scales:
         try:
             self.__socket.close()
             logging.info(
-                f"Сокет {self.__socket.getsockname()} → {self.__socket.getpeername()} ЗАКРЫТ"
+                f"Сокет {self.__socket.getsockname()} ←→ {self.__socket.getpeername()} ЗАКРЫТ"
             )
         except Exception:
             pass
@@ -176,7 +176,7 @@ class Scales:
                 self.__socket.settimeout(None)
 
             logging.info(
-                f"Сокет успешно создан {self.__socket.getsockname()} → {self.__socket.getpeername()}"
+                f"Сокет успешно создан {self.__socket.getsockname()} ←→ {self.__socket.getpeername()}"
             )
         except BaseException as e:
             msg = self.__format_socket_error(e)
@@ -247,24 +247,24 @@ class Scales:
                 self.__socket.sendall(data)
                 if not bigdata:
                     logging.debug(
-                        f"[>] На весы TCP {self.__socket.getsockname()} → {self.__socket.getpeername()} "
+                        f"[>] На весы TCP {self.__socket.getsockname()} ←→ {self.__socket.getpeername()} "
                         f"{label} | {len(data)} байт | HEX: {data.hex()} | {data}"
                     )
                 else:
                     logging.debug(
-                        f"[>] На весы TCP {self.__socket.getsockname()} → {self.__socket.getpeername()} "
+                        f"[>] На весы TCP {self.__socket.getsockname()} ←→ {self.__socket.getpeername()} "
                         f"{label} | {len(data)} байт | {list(data[:17])}"
                     )
             else:
                 self.__socket.sendto(data, (self.ip, self.port))
                 if not bigdata:
                     logging.debug(
-                        f"[>] На весы UDP {self.__socket.getsockname()} → {self.__socket.getpeername()} "
+                        f"[>] На весы UDP {self.__socket.getsockname()} ←→ {self.__socket.getpeername()} "
                         f"{label} | {len(data)} байт | HEX: {data.hex()} | {data}"
                     )
                 else:
                     logging.debug(
-                        f"[>] На весы UDP {self.__socket.getsockname()} → {self.__socket.getpeername()} "
+                        f"[>] На весы UDP {self.__socket.getsockname()} ←→ {self.__socket.getpeername()} "
                         f"{label} | {len(data)} байт | {list(data[:17])}"
                     )
         except BaseException as e:
@@ -302,12 +302,12 @@ class Scales:
 
                 if not bigdata:
                     logging.debug(
-                        f"[<] От весов TCP {self.__socket.getpeername()} → {self.__socket.getsockname()} "
+                        f"[<] От весов TCP {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} "
                         f"| {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
                     )
                 else:
                     logging.debug(
-                        f"[<] От весов TCP {self.__socket.getpeername()} → {self.__socket.getsockname()} "
+                        f"[<] От весов TCP {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} "
                         f"| {len(data)} байт | {list(data[:17])}"
                     )
                 return data
@@ -315,12 +315,12 @@ class Scales:
                 data, _ = self.__socket.recvfrom(bufsize)
                 if not bigdata:
                     logging.debug(
-                        f"[<] От весов UDP {self.__socket.getpeername()} → {self.__socket.getsockname()} "
+                        f"[<] От весов UDP {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} "
                         f"| {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
                     )
                 else:
                     logging.debug(
-                        f"[<] От весов UDP {self.__socket.getpeername()} → {self.__socket.getsockname()} "
+                        f"[<] От весов UDP {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} "
                         f"| {len(data)} байт | {list(data[:17])}"
                     )
                 return data
@@ -458,7 +458,7 @@ class Scales:
 
     def get_products_json(self) -> dict:
         logging.info(
-            f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} инициирован процесс получения JSON списка товаров."
+            f"[!] Сокет {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} инициирован процесс получения JSON списка товаров."
         )
 
         scales_response = self.__transceive(
@@ -537,7 +537,7 @@ class Scales:
                     "Не удалось распознать JSON от весов (получено None)."
                 )
             logging.info(
-                f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} данные товаров в формате JSON получены."
+                f"[!] Сокет {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} данные товаров в формате JSON получены."
             )
             return json_data
 
@@ -629,7 +629,7 @@ class Scales:
 
     def send_json_products(self, data: dict) -> None:
         logging.info(
-            f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} инициирован процесс отправки JSON списка товаров."
+            f"[!] Сокет {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} инициирован процесс отправки JSON списка товаров."
         )
 
         json_bytes = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(
@@ -673,17 +673,17 @@ class Scales:
             if scales_response[5] == Scales.Codes.ResponseCodes.IN_PROGRESS_FILE:
                 time.sleep(1)
                 logging.info(
-                    f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} файл еще находится на стадии проверки устройством."
+                    f"[!] Сокет {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} файл еще находится на стадии проверки устройством."
                 )
                 continue
             elif scales_response[5] == Scales.Codes.ResponseCodes.SUCCESS:
                 logging.info(
-                    f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} файл успешно обработан устройством."
+                    f"[!] Сокет {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} файл успешно обработан устройством."
                 )
                 break
             elif scales_response[5] == Scales.Codes.ResponseCodes.ERROR_FILE:
                 raise DeviceError(
-                    f"[!] Сокет {self.__socket.getpeername()} → {self.__socket.getsockname()} файл обработан с ошибкой. Загрузка не удалась."
+                    f"[!] Сокет {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} файл обработан с ошибкой. Загрузка не удалась."
                 )
 
     class Codes:
