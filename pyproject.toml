@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scales-mer725-driver"
+version = "0.1.0"
+description = "Python library for interacting with Mertech M-ER 725 scales over TCP"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Nikita Chepelskiy" }
+]
+keywords = [
+  "mertech",
+  "scales",
+  "m-er-725",
+  "retail",
+  "json"
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: System :: Networking"
+]
+
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/Zazikni/scales-mer725-driver"
+Repository = "https://github.com/Zazikni/scales-mer725-driver"
+Issues = "https://github.com/Zazikni/scales-mer725-driver/issues"
+
+[tool.setuptools]
+packages = ["scales"]
+include-package-data = false
