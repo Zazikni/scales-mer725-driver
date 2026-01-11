@@ -7,6 +7,7 @@ from json import JSONDecodeError
 from typing import Optional, Tuple
 import logging
 
+import scales
 from .exceptions import DeviceError
 from .utilities import get_json_from_bytearray
 
@@ -17,7 +18,6 @@ class Scales:
         ip: str,
         port: int,
         password: str,
-        protocol: str,
         *,
         connect_timeout: float = 3.0,
         default_timeout: float = 5.0,
@@ -32,17 +32,13 @@ class Scales:
 
         self.__file_chunk_limit = 60000
 
-        if protocol not in ("TCP", "UDP"):
-            raise ValueError("Протокол должен быть TCP или UDP")
-        self.__protocol = socket.SOCK_DGRAM if protocol == "UDP" else socket.SOCK_STREAM
+        self.__protocol =  socket.SOCK_STREAM
 
-        # Поведение при "устройство не отвечает"
         self.__connect_timeout = float(connect_timeout)
         self.__default_timeout = float(default_timeout)
         self.__retries = int(retries)
         self.__retry_delay = float(retry_delay)
         self.__auto_reconnect = bool(auto_reconnect)
-
         self.__connect_with_retries()
 
     def __del__(self):
@@ -154,7 +150,6 @@ class Scales:
                 if attempt < total_attempts:
                     time.sleep(self.__retry_delay)
 
-        # Последняя ошибка уже DeviceError
         if isinstance(last_exc, DeviceError):
             raise last_exc
         raise DeviceError(
@@ -165,13 +160,11 @@ class Scales:
         try:
             self.__socket = socket.socket(socket.AF_INET, self.__protocol)
 
-            # Для TCP connect может зависнуть — задаём таймаут на подключение
             if self.__protocol == socket.SOCK_STREAM:
                 self.__socket.settimeout(self.__connect_timeout)
 
             self.__socket.connect((self.ip, self.port))
 
-            # После connect возвращаемся к управляемым таймаутам на recv
             if self.__protocol == socket.SOCK_STREAM:
                 self.__socket.settimeout(None)
 
@@ -193,7 +186,7 @@ class Scales:
         )
         package = self.__packet_header_gen(payload) + payload
         return (
-            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+                Scales.__tcp_command_len_generator(package, self.command_len_bytes) + package
         )
 
     def __file_creation_status_request_gen(self) -> bytes:
@@ -203,7 +196,7 @@ class Scales:
         )
         package = self.__packet_header_gen(payload) + payload
         return (
-            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+                Scales.__tcp_command_len_generator(package, self.command_len_bytes) + package
         )
 
     def __hash_calculating_request_gen(self) -> bytes:
@@ -214,7 +207,7 @@ class Scales:
         )
         package = self.__packet_header_gen(payload) + payload
         return (
-            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+                Scales.__tcp_command_len_generator(package, self.command_len_bytes) + package
         )
 
     def __hash_calculating_status_request_gen(self) -> bytes:
@@ -225,7 +218,7 @@ class Scales:
         )
         package = self.__packet_header_gen(payload) + payload
         return (
-            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+                Scales.__tcp_command_len_generator(package, self.command_len_bytes) + package
         )
 
     def __file_transfer_init_request_gen(self) -> bytes:
@@ -236,7 +229,7 @@ class Scales:
         )
         package = self.__packet_header_gen(payload) + payload
         return (
-            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+                Scales.__tcp_command_len_generator(package, self.command_len_bytes) + package
         )
 
     # --------- Send/Recv ---------
@@ -256,17 +249,7 @@ class Scales:
                         f"{label} | {len(data)} байт | {list(data[:17])}"
                     )
             else:
-                self.__socket.sendto(data, (self.ip, self.port))
-                if not bigdata:
-                    logging.debug(
-                        f"[>] На весы UDP {self.__socket.getsockname()} ←→ {self.__socket.getpeername()} "
-                        f"{label} | {len(data)} байт | HEX: {data.hex()} | {data}"
-                    )
-                else:
-                    logging.debug(
-                        f"[>] На весы UDP {self.__socket.getsockname()} ←→ {self.__socket.getpeername()} "
-                        f"{label} | {len(data)} байт | {list(data[:17])}"
-                    )
+                raise  DeviceError("Протокол UDP не поддерживается.")
         except BaseException as e:
             msg = self.__format_socket_error(e)
             logging.error(f"Ошибка отправки ({label}): {msg}")
@@ -312,18 +295,7 @@ class Scales:
                     )
                 return data
             else:
-                data, _ = self.__socket.recvfrom(bufsize)
-                if not bigdata:
-                    logging.debug(
-                        f"[<] От весов UDP {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} "
-                        f"| {len(data)} байт | HEX: {data.hex()} | {data} | {list(data)}"
-                    )
-                else:
-                    logging.debug(
-                        f"[<] От весов UDP {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} "
-                        f"| {len(data)} байт | {list(data[:17])}"
-                    )
-                return data
+                raise DeviceError("Протокол UDP не поддерживается.")
 
         except socket.timeout:
             logging.warning(
@@ -390,7 +362,7 @@ class Scales:
         retry_delay: Optional[float] = None,
     ) -> bytes:
         """
-        Send + recv с повторными попытками при отсутствии ответа (timeout) и
+        Send + recv с повторными попытками при отсутствии ответа и
         с понятной ошибкой, если устройство не отвечает.
         """
         if retries is None:
@@ -413,7 +385,7 @@ class Scales:
                 )
                 time.sleep(retry_delay)
 
-                # Для TCP — пробуем переподключиться между ретраями
+                # Для TCP переподкл
                 if self.__auto_reconnect and self.__protocol == socket.SOCK_STREAM:
                     try:
                         self.__reconnect()
@@ -514,7 +486,6 @@ class Scales:
             )
             time.sleep(0.3)
 
-            # На порции файла разумнее увеличить таймаут
             data = self.__recv(65507, timeout=10, bigdata=True)
             if data is None:
                 raise DeviceError(
@@ -565,7 +536,7 @@ class Scales:
         )
         package = self.__packet_header_gen(payload) + payload
         return (
-            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+                Scales.__tcp_command_len_generator(package, self.command_len_bytes) + package
         )
 
     def __file_transfer_commands_gen(
@@ -597,7 +568,7 @@ class Scales:
             )
             package = self.__packet_header_gen(payload) + payload
             packets.append(
-                Scales.tcp_command_len_generator(package, self.command_len_bytes)
+                Scales.__tcp_command_len_generator(package, self.command_len_bytes)
                 + package
             )
 
@@ -611,7 +582,7 @@ class Scales:
         payload = command + self.__password + file_check_code
         package = self.__packet_header_gen(payload) + payload
         return (
-            Scales.tcp_command_len_generator(package, self.command_len_bytes) + package
+                Scales.__tcp_command_len_generator(package, self.command_len_bytes) + package
         )
 
     @staticmethod
@@ -624,7 +595,7 @@ class Scales:
             )
 
     @staticmethod
-    def tcp_command_len_generator(package: bytes, length: int) -> bytes:
+    def __tcp_command_len_generator(package: bytes, length: int) -> bytes:
         return len(package).to_bytes(length, byteorder="little", signed=False)
 
     def send_json_products(self, data: dict) -> None:
@@ -685,6 +656,7 @@ class Scales:
                 raise DeviceError(
                     f"[!] Сокет {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} файл обработан с ошибкой. Загрузка не удалась."
                 )
+
 
     class Codes:
         """
