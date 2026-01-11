@@ -132,7 +132,7 @@ class Scales:
         """
         last_exc: BaseException | None = None
 
-        # retries=2 => всего 3 попытки
+
         total_attempts = self.__retries + 1 if self.__retries >= 0 else 1
 
         for attempt in range(1, total_attempts + 1):
@@ -480,7 +480,7 @@ class Scales:
 
         file_data = bytearray()
         while True:
-            _ = self.__send(
+            self.__send(
                 self.__file_transfer_init_request_gen(),
                 "Пакет с запросом на получение порции файла",
             )
@@ -543,8 +543,8 @@ class Scales:
         self,
         data: bytes,
     ) -> Tuple[bytes, ...]:
-        command = bytes([0xFF, 0x13])
-        chunk_sending_code = bytes([0x03])
+        command = Scales.Codes.JsonFileTransfer.FILE_TRANSFER_COMMAND_CODE
+        chunk_sending_code = Scales.Codes.JsonFileTransfer.CHUNK_SENDING_CODE
         offset_param = 0
         total_len = len(data)
         packets = []
@@ -553,7 +553,7 @@ class Scales:
             chunk = data[offset_param : offset_param + self.__file_chunk_limit]
             is_last = offset_param + self.__file_chunk_limit >= total_len
 
-            is_last_byte = bytes([0x01]) if is_last else bytes([0x00])
+            is_last_byte =Scales.Codes.JsonFileTransfer.LAST_CHUNK_TRUE_CODE if is_last else Scales.Codes.JsonFileTransfer.LAST_CHUNK_FALSE_CODE
             offset_bytes = offset_param.to_bytes(4, "little")
             chunk_len_bytes = len(chunk).to_bytes(2, "little")
 
@@ -577,8 +577,8 @@ class Scales:
         return tuple(packets)
 
     def __transfered_file_check_command_gen(self):
-        command = bytes([0xFF, 0x13])
-        file_check_code = bytes([0x09])
+        command = Scales.Codes.JsonFileTransfer.FILE_TRANSFER_COMMAND_CODE
+        file_check_code = Scales.Codes.JsonFileTransfer.FILE_CHECK_CODE
         payload = command + self.__password + file_check_code
         package = self.__packet_header_gen(payload) + payload
         return (
@@ -691,3 +691,4 @@ class Scales:
             LAST_CHUNK_TRUE_CODE = bytes([0x01])
             LAST_CHUNK_FALSE_CODE = bytes([0x00])
             CHUNK_SENDING_CODE = bytes([0x03])
+            FILE_CHECK_CODE = bytes([0x09])
