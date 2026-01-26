@@ -598,7 +598,7 @@ class Scales:
     def __tcp_command_len_generator(package: bytes, length: int) -> bytes:
         return len(package).to_bytes(length, byteorder="little", signed=False)
 
-    def send_json_products(self, data: dict) -> None:
+    def send_json_products(self, data: dict, clear_database: bool ) -> None:
         logging.info(
             f"[!] Сокет {self.__socket.getpeername()} ←→ {self.__socket.getsockname()} инициирован процесс отправки JSON списка товаров."
         )
@@ -608,7 +608,7 @@ class Scales:
         )
 
         scales_response = self.__transceive(
-            self.__initial_file_transfer_request_gen(json_bytes, clear_database=True),
+            self.__initial_file_transfer_request_gen(json_bytes, clear_database=clear_database),
             "Пакет, содержащий хэш-данные файла и параметры",
         )
         self.__response_validator(scales_response, length=5)
